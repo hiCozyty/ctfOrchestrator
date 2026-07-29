@@ -1,0 +1,5 @@
+node_modules/
+.env
+.ctf-state.json
+.ctf-finish-pending
+.ctf-helpme-pending
