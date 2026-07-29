@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "powershell-mcp": {
+      "type": "local",
+      "command": ["node", "/path/to/powershell-mcp/src/server.js"],
+      "enabled": false
+    }
+  }
+}

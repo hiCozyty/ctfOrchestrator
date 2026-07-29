@@ -1,0 +1,35 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "cyberchef": {
+      "type": "local",
+      "command": ["docker", "run", "-i", "--rm", "ghcr.io/doublegate/cyberchef-mcp_v1:latest"],
+      "enabled": false
+    },
+    "ctf-mcp": {
+      "type": "local",
+      "command": ["ctf-mcp"],
+      "enabled": false
+    },
+    "exif-mcp": {
+      "type": "local",
+      "command": ["node", "/path/to/exif-mcp/dist/server.js"],
+      "enabled": false
+    },
+    "exiftool-mcp": {
+      "type": "local",
+      "command": ["exiftool-mcp"],
+      "enabled": false
+    },
+    "ocr": {
+      "type": "local",
+      "command": ["python", "-m", "mcp_ocr"],
+      "enabled": false
+    },
+    "easyocr": {
+      "type": "local",
+      "command": ["uv", "--directory", "/path/to/easyocr-mcp", "run", "easyocr-mcp.py"],
+      "enabled": false
+    }
+  }
+}
