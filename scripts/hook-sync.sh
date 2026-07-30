@@ -8,6 +8,18 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 [ -z "${CTF_USER:-}" ] && exit 0
 [ -z "${WORKER_URL:-}" ] && exit 0
 
+THREAD_ID_ARG=""
+for arg in "$@"; do
+  if [ "$arg" = "--thread-id" ]; then
+    THREAD_ID_ARG="next"
+  elif [ "$THREAD_ID_ARG" = "next" ]; then
+    THREAD_ID_ARG="$arg"
+  fi
+done
+if [ "$THREAD_ID_ARG" = "next" ]; then
+  THREAD_ID_ARG=""
+fi
+
 STATE_FILE="$PROJECT_DIR/.ctf-state.json"
 [ ! -f "$STATE_FILE" ] && exit 0
 
@@ -42,7 +54,11 @@ THINKING=$(echo "$LAST_MSG" | jq -r '
 CURRENT=$(jq -r '.current // empty' "$STATE_FILE")
 [ -z "$CURRENT" ] || [ "$CURRENT" = "null" ] && exit 0
 
-THREAD_ID=$(jq -r --arg name "$CURRENT" '.active[$name].threadId // empty' "$STATE_FILE")
+if [ -n "$THREAD_ID_ARG" ]; then
+  THREAD_ID="$THREAD_ID_ARG"
+else
+  THREAD_ID=$(jq -r --arg name "$CURRENT" '.active[$name].threadId // empty' "$STATE_FILE")
+fi
 [ -z "$THREAD_ID" ] || [ "$THREAD_ID" = "null" ] && exit 0
 
 curl -sS -X POST "$WORKER_URL/syncMessage" \

@@ -76,6 +76,8 @@ if [ "$OK" = "true" ]; then
   fi
 
   echo "Started $CHALLENGE_NAME. New thread created. Ready to sync your solving work."
+  echo "CTF_SESSION_DATA:$(jq -n --arg sessionId "$SESSION_ID" --arg threadId "$THREAD_ID" --arg challenge "$CHALLENGE_NAME" \
+    '{$sessionId, $threadId, $challenge}' | jq -c .)"
 else
   ERROR=$(echo "$RESPONSE" | jq -r '.error // "Unknown error"')
   echo "Start failed: $ERROR"

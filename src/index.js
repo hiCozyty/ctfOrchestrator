@@ -515,7 +515,7 @@ export class MyDurableObject extends DurableObject {
 		);
 
 		challenge.activeUsers[user] = true;
-		state.activeSessions[sessionId] = challengeName;
+		state.activeSessions[sessionId] = { challengeName, threadId: thread.id };
 
 		await this.sendPlayerBoard(state);
 		await this.sendChallengeBoard(state);
@@ -708,8 +708,8 @@ export class MyDurableObject extends DurableObject {
 
 		delete challenge.activeUsers[user];
 
-		for (const [sessionId, name] of Object.entries(state.activeSessions)) {
-			if (name === challengeName && sessionId.startsWith(user + "-")) {
+		for (const [sessionId, entry] of Object.entries(state.activeSessions)) {
+			if (entry.challengeName === challengeName && sessionId.startsWith(user + "-")) {
 				delete state.activeSessions[sessionId];
 			}
 		}
