@@ -1,12 +1,12 @@
 # CTF Team Orchestrator
 
-Cloudflare Worker + Durable Object that coordinates a 5-person CTF team through Discord. Each teammate's local coding agent sends one-shot HTTP calls before and after solving challenges; the Worker maintains shared ground truth — player roster, challenge channels/threads, and solver status — all reflected live in Discord.
+Cloudflare Worker + Durable Object that coordinates a CTF team through Discord. Each teammate's local coding agent sends one-shot HTTP calls before and after solving challenges; the Worker maintains shared ground truth — player roster, challenge channels/threads, and solver status — all reflected live in Discord.
 
 ## How it works
 
 ```
 Agent harness    →   Worker (fetch handler)   →   Durable Object (SQLite)
-(opencode)            routes 9 endpoints          state + Discord API calls
+(opencode)            routes 12 endpoints         state + Discord API calls
 ```
 
 - **One Worker** holds the bot token and routes all HTTP requests to a single Durable Object instance (`idFromName("main")`).
@@ -100,9 +100,9 @@ curl -s -X POST http://localhost:8787/helpme \
   -d '{"user":"Alice","channelId":"<channelId>"}'
 
 # Undo a finished challenge
-curl -s -X POST http://localhost:8787/undofin \
+curl -s -X POST http://localhost:8787/undoFinish \
   -H 'Content-Type: application/json' \
-  -d '{"challengeName":"web-flag"}'
+  -d '{"user":"Alice","challengeName":"web-flag"}'
 ```
 
 ## Agent integration
@@ -114,11 +114,13 @@ All harnesses use the same shell scripts in `scripts/`:
 | Script | What it does |
 |--------|--------------|
 | `hook-admin-init.sh` | Calls `/adminInit` with challenges |
-| `hook-init.sh` | Calls `/init`, writes `CTF_USER` to `.env` |
+| `hook-admin-reset.sh` | Calls `/adminReset`, cleans local state files |
+| `hook-init.sh` | Calls `/init`, reads `CTF_USER` from `.env` |
 | `hook-start.sh` | Calls `/start`, writes `.ctf-state.json` |
 | `hook-finish.sh` | Two-step confirm then calls `/finish`, cleans `.ctf-state.json` |
 | `hook-helpme.sh` | Two-step confirm then calls `/helpme` |
-| `hook-undofin.sh` | Calls `/undofin` |
+| `hook-undoFinish.sh` | Calls `/undoFinish`, restores `.ctf-state.json` |
+| `hook-undoStart.sh` | Calls `/undoStart`, cleans `.ctf-state.json` |
 | `hook-sync.sh` | Extracts last assistant message from JSONL, calls `/syncMessage` |
 
 Scripts accept CLI args (for direct invocation) and fall back to stdin JSON (for when triggered by hooks). See each script's header for usage.
@@ -132,14 +134,15 @@ Scripts accept CLI args (for direct invocation) and fall back to stdin JSON (for
 | Command | Example |
 |---------|---------|
 | `/adminInit web-flag crypto-rsa` | Initialize with challenge list |
-| `/init Alice` | Register as a player |
+| `/init` | Register as a player (uses `CTF_USER` from `.env`) |
 | `/start web-flag` | Start working on a challenge |
 | `/finish` | Finish (two-step via the plugin tool) |
 | `/helpme` | Request help (two-step via the plugin tool) |
-| `/undofin web-flag` | Undo a finished challenge |
+| `/undoFinish web-flag` | Undo a finished challenge |
+| `/undoStart web-flag` | Undo a challenge start |
 | `/adminReset` | Reset all CTF state (admin only) |
 
-**Custom tools** (called automatically by the LLM): `hook-admin-init.sh`, `hook-admin-reset.sh`, `hook-init.sh`, `hook-start.sh`, `hook-finish.sh`, `hook-helpme.sh`, `hook-undoFinish.sh`.
+**Custom tools** (called automatically by the LLM): `hook-admin-init.sh`, `hook-admin-reset.sh`, `hook-init.sh`, `hook-start.sh`, `hook-finish.sh`, `hook-helpme.sh`, `hook-undoFinish.sh`, `hook-undoStart.sh`, `hook-sync.sh`.
 
 **Auto-sync**: The `session.idle` handler syncs the last assistant message to the Discord thread.
 
@@ -150,12 +153,14 @@ Scripts accept CLI args (for direct invocation) and fall back to stdin JSON (for
 | `GET` | `/initialized` | — | Check if admin has initialized |
 | `POST` | `/adminInit` | `secret`, `challenges[]` | Initialize challenge list |
 | `POST` | `/adminReset` | `secret` | Reset all state to defaults |
-| `POST` | `/init` | `user` | Register a player |
+| `POST` | `/init` | `user`, `userId?` | Register a player |
 | `POST` | `/start` | `user`, `challenge`, `sessionId` | Start working on a challenge |
 | `POST` | `/finish` | `user`, `channelId` | Mark challenge as done |
 | `POST` | `/helpme` | `user`, `channelId` | Request help on a challenge |
-| `POST` | `/undofin` | `challengeName` | Un-finish a challenge |
-| `POST` | `/syncMessage` | `user`, `channelId`, `content` | Post a message to a thread |
+| `POST` | `/undoFinish` | `user`, `challengeName` | Un-finish a challenge |
+| `POST` | `/undoStart` | `user`, `challengeName` | Undo a challenge start |
+| `POST` | `/syncMessage` | `user`, `channelId`, `content`, `thinking?` | Post a message to a thread |
+| `GET` | `/challenges` | — | List all challenge names |
 | `POST` | `/lookup` | `channelId` or `challengeName` | Look up channel/challenge info |
 
 All responses are JSON: `{ "ok": true, "data": { ... } }` on success, `{ "ok": false, "error": "..." }` on failure.
@@ -191,8 +196,9 @@ All Discord API calls go through a centralized queue (`discordFetch`) that respe
 ```js
 {
   initialized: true,
-  playersMessageId: "..."   // #progress message ID for the players list
-  challengesMessageId: "..." // #progress message ID for the challenges list
+  playersMessageId: "..."      // #progress message ID for the players list
+  challengeMessageIds: ["..."] // #progress message IDs for the challenges list (array, chunked if >2000 chars)
+  playerIds: { "Alice": "discord_user_id" }, // for @mentions
   players: { "Alice": true, "Bob": true },
   challenges: {
     "web-flag": {

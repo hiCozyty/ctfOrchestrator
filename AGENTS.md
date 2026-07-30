@@ -12,3 +12,13 @@ This is a CTF event coordination bot. The `hook-*.sh` scripts in `scripts/` talk
 - `hook-undoFinish.sh` — undo a challenge finish
 - `hook-sync.sh` — sync transcript with the Worker
 
+## CTF-MCP Tools
+
+The `ctf-mcp` MCP server provides 126 tools for solving CTF challenges. Use them when analyzing crypto, web, pwn, reverse, forensics, or misc challenges.
+
+- **Crypto** (53 tools): base encoding (Base64/32/58/85), classical ciphers (Caesar, Vigenere, XOR, etc.), hash cracking, RSA attacks, frequency analysis
+- **Web** (46 tools): SQL injection payloads, XSS/SSTI/SSRF/XXE attacks, JWT attacks, deserialization, command injection
+- **Pwn** (27 tools): shellcode generation, cyclic patterns, ROP gadgets, format string exploits, heap exploitation
+
+Prefix tool calls with `ctf-mcp_` (e.g., `ctf-mcp_base64_decode`, `ctf-mcp_sql_payloads`).
+
