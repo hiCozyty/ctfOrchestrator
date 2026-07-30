@@ -13,12 +13,22 @@ ENV_FILE="$PROJECT_DIR/.env"
 [ -z "${WORKER_URL:-}" ] && { echo "ERROR: WORKER_URL not set in .env"; exit 1; }
 
 YES_FLAG=false
+EXPLICIT_NAME=""
 for arg in "$@"; do
-  [ "$arg" = "--yes" ] && YES_FLAG=true
+  if [ "$arg" = "--yes" ]; then
+    YES_FLAG=true
+  elif [ -z "$EXPLICIT_NAME" ]; then
+    EXPLICIT_NAME="$arg"
+  fi
 done
 
+if [ -z "$EXPLICIT_NAME" ]; then
+  INPUT="$(cat 2>/dev/null || echo '{}')"
+  EXPLICIT_NAME=$(echo "$INPUT" | jq -r '.args // .prompt // .text // empty' | sed 's/^\/helpme\s*//' | xargs)
+fi
+
 # --- Pending confirmation? Execute. ---
-if [ -f "$PENDING_FILE" ]; then
+if [ -f "$PENDING_FILE" ] && [ "$YES_FLAG" = "true" ]; then
   PENDING_CHANNEL=$(jq -r '.channelId // empty' "$PENDING_FILE")
   PENDING_NAME=$(jq -r '.challengeName // empty' "$PENDING_FILE")
 
@@ -57,16 +67,45 @@ if [ "$YES_FLAG" = "true" ]; then
   exit 1
 fi
 
-if [ ! -f "$STATE_FILE" ]; then
-  echo "No active challenge. Run /start first."
-  exit 1
-fi
+if [ -n "$EXPLICIT_NAME" ] && [ "$EXPLICIT_NAME" != "null" ]; then
+  CHALLENGE_NAME="$EXPLICIT_NAME"
+  CHANNEL_ID=""
+  if [ -f "$STATE_FILE" ]; then
+    CHANNEL_ID=$(jq -r --arg name "$CHALLENGE_NAME" '.active[$name].channelId // empty' "$STATE_FILE")
+  fi
+else
+  if [ ! -f "$STATE_FILE" ]; then
+    echo "No active challenge. Run /start first."
+    exit 1
+  fi
 
-CHALLENGE_NAME=$(jq -r '.challengeName // empty' "$STATE_FILE")
-CHANNEL_ID=$(jq -r '.channelId // empty' "$STATE_FILE")
+  ACTIVE_COUNT=$(jq '.active | length' "$STATE_FILE")
+  if [ "$ACTIVE_COUNT" -eq 0 ]; then
+    echo "No active challenge. Run /start first."
+    exit 1
+  elif [ "$ACTIVE_COUNT" -eq 1 ]; then
+    CHALLENGE_NAME=$(jq -r '.active | keys[0]' "$STATE_FILE")
+    CHANNEL_ID=$(jq -r --arg name "$CHALLENGE_NAME" '.active[$name].channelId' "$STATE_FILE")
+  else
+    CURRENT=$(jq -r '.current // empty' "$STATE_FILE")
+    if [ -z "$CURRENT" ] || [ "$CURRENT" = "null" ]; then
+      echo "Multiple active challenges. Specify which one:"
+      jq -r '.active | keys[]' "$STATE_FILE" | while read -r name; do echo "  - $name"; done
+      echo "Usage: /helpme <challenge-name>"
+      exit 1
+    fi
+    CHALLENGE_NAME="$CURRENT"
+    CHANNEL_ID=$(jq -r --arg name "$CHALLENGE_NAME" '.active[$name].channelId' "$STATE_FILE")
+  fi
+fi
 
 if [ -z "$CHALLENGE_NAME" ] || [ "$CHALLENGE_NAME" = "null" ]; then
   echo "Could not determine challenge name. Run /start first."
+  exit 1
+fi
+
+if [ -z "$CHANNEL_ID" ] || [ "$CHANNEL_ID" = "null" ]; then
+  echo "Challenge \"$CHALLENGE_NAME\" is not in your active challenges."
   exit 1
 fi
 

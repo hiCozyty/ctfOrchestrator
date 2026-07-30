@@ -41,7 +41,7 @@ if [ "$OK" != "true" ]; then
     if [ -z "$MATCH" ]; then
       MATCH=$(echo "$CHALLENGES_JSON" | jq -r --arg cl "$CHALLENGE_LOWER" \
         '.data[] | select((. | ascii_downcase) | contains($cl))' 2>/dev/null || true)
-      MATCH_COUNT=$(echo "$MATCH" | grep -c . 2>/dev/null)
+      MATCH_COUNT=$(echo "$MATCH" | wc -l)
       if [ "$MATCH_COUNT" -ne 1 ]; then
         ERROR=$(echo "$RESPONSE" | jq -r '.error // "Unknown error"')
         echo "Start failed: $ERROR"
@@ -63,10 +63,17 @@ if [ "$OK" = "true" ]; then
   THREAD_ID=$(echo "$RESPONSE" | jq -r '.data.threadId')
   CHALLENGE_NAME=$(echo "$RESPONSE" | jq -r '.data.challengeName')
 
-  jq -n --arg challengeName "$CHALLENGE_NAME" --arg channelId "$CHANNEL_ID" \
-    --arg threadId "$THREAD_ID" --arg sessionId "$SESSION_ID" \
-    '{$challengeName, $channelId, $threadId, $sessionId}' \
-    > "$PROJECT_DIR/.ctf-state.json"
+  STATE_FILE="$PROJECT_DIR/.ctf-state.json"
+  ENTRY=$(jq -n --arg channelId "$CHANNEL_ID" --arg threadId "$THREAD_ID" --arg sessionId "$SESSION_ID" \
+    '{channelId: $channelId, threadId: $threadId, sessionId: $sessionId}')
+
+  if [ -f "$STATE_FILE" ]; then
+    jq --arg name "$CHALLENGE_NAME" --argjson entry "$ENTRY" \
+      '.active[$name] = $entry | .current = $name' "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
+  else
+    jq -n --arg name "$CHALLENGE_NAME" --argjson entry "$ENTRY" \
+      '{active: {($name): $entry}, current: $name}' > "$STATE_FILE"
+  fi
 
   echo "Started $CHALLENGE_NAME. New thread created. Ready to sync your solving work."
 else

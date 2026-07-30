@@ -39,7 +39,10 @@ THINKING=$(echo "$LAST_MSG" | jq -r '
 
 [ -z "$CONTENT" ] || [ "$CONTENT" = "null" ] && exit 0
 
-THREAD_ID=$(jq -r '.threadId // empty' "$STATE_FILE")
+CURRENT=$(jq -r '.current // empty' "$STATE_FILE")
+[ -z "$CURRENT" ] || [ "$CURRENT" = "null" ] && exit 0
+
+THREAD_ID=$(jq -r --arg name "$CURRENT" '.active[$name].threadId // empty' "$STATE_FILE")
 [ -z "$THREAD_ID" ] || [ "$THREAD_ID" = "null" ] && exit 0
 
 curl -sS -X POST "$WORKER_URL/syncMessage" \

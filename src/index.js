@@ -488,6 +488,7 @@ export class MyDurableObject extends DurableObject {
 			channelId = channel.id;
 			challenge.channelId = channelId;
 			challenge.currentCategory = "ctf-challenges";
+			await this.putState(state);
 		}
 
 		const starterMsg = await this.discordFetch(
@@ -628,11 +629,14 @@ export class MyDurableObject extends DurableObject {
 		return { moved: true, challengeName: name };
 	}
 
-	async undoFinishChallenge(challengeName) {
+	async undoFinishChallenge(user, challengeName) {
 		const state = await this.getState();
 
 		if (!state.initialized) {
 			throw new Error("Admin has not initialized challenges yet. Wait for /adminInit.");
+		}
+		if (!state.players[user]) {
+			throw new Error("You haven't run /init yet. Run /init first.");
 		}
 
 		const challenge = state.challenges[challengeName];
@@ -641,6 +645,9 @@ export class MyDurableObject extends DurableObject {
 		}
 		if (!challenge.solved) {
 			throw new Error(`Challenge "${challengeName}" is not solved. Nothing to undo.`);
+		}
+		if (challenge.solverName !== user) {
+			throw new Error(`Only ${challenge.solverName} (the solver) can undo this finish.`);
 		}
 		if (!challenge.previousCategory) {
 			throw new Error(`Cannot undo: previous category not recorded for "${challengeName}".`);
@@ -672,7 +679,7 @@ export class MyDurableObject extends DurableObject {
 		await this.sendPlayerBoard(state);
 
 		await this.putState(state);
-		return { challengeName, restoredTo: challenge.currentCategory };
+		return { challengeName, channelId: challenge.channelId, restoredTo: challenge.currentCategory };
 	}
 
 	async undoStartChallenge(user, challengeName) {
@@ -699,7 +706,7 @@ export class MyDurableObject extends DurableObject {
 		delete challenge.activeUsers[user];
 
 		for (const [sessionId, name] of Object.entries(state.activeSessions)) {
-			if (name === challengeName) {
+			if (name === challengeName && sessionId.startsWith(user + "-")) {
 				delete state.activeSessions[sessionId];
 			}
 		}
@@ -828,7 +835,7 @@ export default {
 					break;
 				}
 				case "/undoFinish": {
-					result = await stub.undoFinishChallenge(body.challengeName);
+					result = await stub.undoFinishChallenge(body.user, body.challengeName);
 					break;
 				}
 				case "/undoStart": {

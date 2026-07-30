@@ -24,11 +24,11 @@ done
 
 if [ -z "$EXPLICIT_NAME" ]; then
   INPUT="$(cat 2>/dev/null || echo '{}')"
-  EXPLICIT_NAME=$(echo "$INPUT" | jq -r '.args // .prompt // .text // empty' |     sed 's/^\/finish\s*//' | xargs)
+  EXPLICIT_NAME=$(echo "$INPUT" | jq -r '.args // .prompt // .text // empty' | sed 's/^\/finish\s*//' | xargs)
 fi
 
 # --- Pending confirmation? Execute. ---
-if [ -f "$PENDING_FILE" ]; then
+if [ -f "$PENDING_FILE" ] && [ "$YES_FLAG" = "true" ]; then
   PENDING_CHANNEL=$(jq -r '.channelId // empty' "$PENDING_FILE")
   PENDING_NAME=$(jq -r '.challengeName // empty' "$PENDING_FILE")
 
@@ -47,6 +47,19 @@ if [ -f "$PENDING_FILE" ]; then
 
   OK=$(echo "$RESPONSE" | jq -r '.ok // false')
   if [ "$OK" = "true" ]; then
+    # Remove from active state
+    if [ -f "$STATE_FILE" ]; then
+      jq --arg name "$PENDING_NAME" 'del(.active[$name])' "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
+      # Update current if needed
+      NEW_CURRENT=$(jq -r --arg name "$PENDING_NAME" \
+        'if .current == $name then (.active | keys[0] // empty) else .current end' "$STATE_FILE")
+      if [ -z "$NEW_CURRENT" ] || [ "$NEW_CURRENT" = "null" ]; then
+        rm -f "$STATE_FILE"
+      else
+        jq --arg c "$NEW_CURRENT" '.current = $c' "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
+      fi
+    fi
+
     MOVED=$(echo "$RESPONSE" | jq -r '.data.moved // false')
     if [ "$MOVED" = "true" ]; then
       NEW_SOLVER=$(echo "$RESPONSE" | jq -r '.data.solverName // ""')
@@ -55,7 +68,6 @@ if [ -f "$PENDING_FILE" ]; then
       REMAINING=$(echo "$RESPONSE" | jq -r '.data.remainingActiveUsers // "?"')
       echo "Noted. $REMAINING other user(s) still working on $PENDING_NAME. Channel stays in place."
     fi
-    rm -f "$STATE_FILE"
   else
     ERROR=$(echo "$RESPONSE" | jq -r '.error // "Unknown error"')
     echo "Finish failed: $ERROR"
@@ -73,13 +85,33 @@ fi
 if [ -n "$EXPLICIT_NAME" ] && [ "$EXPLICIT_NAME" != "null" ]; then
   CHALLENGE_NAME="$EXPLICIT_NAME"
   CHANNEL_ID=""
+  if [ -f "$STATE_FILE" ]; then
+    CHANNEL_ID=$(jq -r --arg name "$CHALLENGE_NAME" '.active[$name].channelId // empty' "$STATE_FILE")
+  fi
 else
   if [ ! -f "$STATE_FILE" ]; then
     echo "No active challenge. Run /start first."
     exit 1
   fi
-  CHALLENGE_NAME=$(jq -r '.challengeName // empty' "$STATE_FILE")
-  CHANNEL_ID=$(jq -r '.channelId // empty' "$STATE_FILE")
+
+  ACTIVE_COUNT=$(jq '.active | length' "$STATE_FILE")
+  if [ "$ACTIVE_COUNT" -eq 0 ]; then
+    echo "No active challenge. Run /start first."
+    exit 1
+  elif [ "$ACTIVE_COUNT" -eq 1 ]; then
+    CHALLENGE_NAME=$(jq -r '.active | keys[0]' "$STATE_FILE")
+    CHANNEL_ID=$(jq -r --arg name "$CHALLENGE_NAME" '.active[$name].channelId' "$STATE_FILE")
+  else
+    CURRENT=$(jq -r '.current // empty' "$STATE_FILE")
+    if [ -z "$CURRENT" ] || [ "$CURRENT" = "null" ]; then
+      echo "Multiple active challenges. Specify which one:"
+      jq -r '.active | keys[]' "$STATE_FILE" | while read -r name; do echo "  - $name"; done
+      echo "Usage: /finish <challenge-name>"
+      exit 1
+    fi
+    CHALLENGE_NAME="$CURRENT"
+    CHANNEL_ID=$(jq -r --arg name "$CHALLENGE_NAME" '.active[$name].channelId' "$STATE_FILE")
+  fi
 fi
 
 if [ -z "$CHALLENGE_NAME" ] || [ "$CHALLENGE_NAME" = "null" ]; then

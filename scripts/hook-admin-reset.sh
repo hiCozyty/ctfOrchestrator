@@ -17,6 +17,9 @@ RESPONSE=$(curl -sS -X POST "$WORKER_URL/adminReset" \
 OK=$(echo "$RESPONSE" | jq -r '.ok // false')
 if [ "$OK" = "true" ]; then
   echo "CTF state reset. Run /adminInit to reinitialize."
+  rm -f "$PROJECT_DIR/.ctf-state.json" \
+        "$PROJECT_DIR/.ctf-finish-pending" \
+        "$PROJECT_DIR/.ctf-helpme-pending"
 else
   ERROR=$(echo "$RESPONSE" | jq -r '.error // "Unknown error"')
   echo "AdminReset failed: $ERROR"
