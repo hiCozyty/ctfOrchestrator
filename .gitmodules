@@ -1,0 +1,3 @@
+[submodule "CTF-MCP"]
+	path = CTF-MCP
+	url = https://github.com/hiCozyty/CTF-MCP.git
