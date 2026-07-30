@@ -323,8 +323,10 @@ export class MyDurableObject extends DurableObject {
 		state.challenges = challenges;
 
 		await this.sendPlayerBoard(state);
+		await this.putState(state);
 
 		await this.sendChallengeBoard(state);
+		await this.putState(state);
 
 		state.initialized = true;
 		await this.putState(state);
@@ -554,7 +556,6 @@ export class MyDurableObject extends DurableObject {
 		}
 
 		delete challenge.activeUsers[user];
-		await this.sendPlayerBoard(state);
 
 		const remaining = Object.keys(challenge.activeUsers).length;
 
@@ -572,12 +573,14 @@ export class MyDurableObject extends DurableObject {
 				},
 			);
 
+			await this.sendPlayerBoard(state);
 			await this.sendChallengeBoard(state);
 
 			await this.putState(state);
 			return { moved: true, challengeName: name, solverName: user };
 		}
 
+		await this.sendPlayerBoard(state);
 		await this.putState(state);
 		return { moved: false, challengeName: name, remainingActiveUsers: remaining };
 	}
