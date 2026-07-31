@@ -57,7 +57,7 @@ CURRENT=$(jq -r '.current // empty' "$STATE_FILE")
 if [ -n "$THREAD_ID_ARG" ]; then
   THREAD_ID="$THREAD_ID_ARG"
 else
-  THREAD_ID=$(jq -r --arg name "$CURRENT" '.active[$name].threadId // empty' "$STATE_FILE")
+  THREAD_ID=$(jq -r --arg sid "$CURRENT" '.sessions[$sid].threadId // empty' "$STATE_FILE")
 fi
 [ -z "$THREAD_ID" ] || [ "$THREAD_ID" = "null" ] && exit 0
 

@@ -158,8 +158,8 @@ export const CTFSyncPlugin: Plugin = async ({ client, directory }) => {
 				const state = await readStateFile(projectDir);
 				if (state) {
 					const current = state.current as string | undefined;
-					const active = state.active as Record<string, { threadId?: string }> | undefined;
-					threadId = current ? active?.[current]?.threadId : undefined;
+					const sessions = state.sessions as Record<string, { threadId?: string }> | undefined;
+					threadId = current ? sessions?.[current]?.threadId : undefined;
 					if (threadId) {
 						sessionMap[sessionID] = threadId;
 						await writeSessionMap(projectDir, sessionMap);

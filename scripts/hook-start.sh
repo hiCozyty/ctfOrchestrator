@@ -64,15 +64,15 @@ if [ "$OK" = "true" ]; then
   CHALLENGE_NAME=$(echo "$RESPONSE" | jq -r '.data.challengeName')
 
   STATE_FILE="$PROJECT_DIR/.ctf-state.json"
-  ENTRY=$(jq -n --arg channelId "$CHANNEL_ID" --arg threadId "$THREAD_ID" --arg sessionId "$SESSION_ID" \
-    '{channelId: $channelId, threadId: $threadId, sessionId: $sessionId}')
+  ENTRY=$(jq -n --arg channelId "$CHANNEL_ID" --arg threadId "$THREAD_ID" --arg challenge "$CHALLENGE_NAME" \
+    '{channelId: $channelId, threadId: $threadId, challenge: $challenge}')
 
   if [ -f "$STATE_FILE" ]; then
-    jq --arg name "$CHALLENGE_NAME" --argjson entry "$ENTRY" \
-      '.active[$name] = $entry | .current = $name' "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
+    jq --arg sid "$SESSION_ID" --argjson entry "$ENTRY" \
+      '.sessions[$sid] = $entry | .current = $sid' "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
   else
-    jq -n --arg name "$CHALLENGE_NAME" --argjson entry "$ENTRY" \
-      '{active: {($name): $entry}, current: $name}' > "$STATE_FILE"
+    jq -n --arg sid "$SESSION_ID" --argjson entry "$ENTRY" \
+      '{sessions: {($sid): $entry}, current: $sid}' > "$STATE_FILE"
   fi
 
   echo "Started $CHALLENGE_NAME. New thread created. Ready to sync your solving work."

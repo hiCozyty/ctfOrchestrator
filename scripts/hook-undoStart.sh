@@ -21,7 +21,7 @@ if [ -z "$CHALLENGE_NAME" ] || [ "$CHALLENGE_NAME" = "null" ]; then
   if [ -f "$STATE_FILE" ]; then
     CURRENT=$(jq -r '.current // empty' "$STATE_FILE")
     if [ -n "$CURRENT" ] && [ "$CURRENT" != "null" ]; then
-      CHALLENGE_NAME="$CURRENT"
+      CHALLENGE_NAME=$(jq -r --arg sid "$CURRENT" '.sessions[$sid].challenge // empty' "$STATE_FILE")
     fi
   fi
 fi
@@ -41,9 +41,9 @@ if [ "$OK" = "true" ]; then
   echo "Undid start for $CHALLENGE_NAME. You are no longer working on it."
 
   if [ -f "$STATE_FILE" ]; then
-    jq --arg name "$CHALLENGE_NAME" 'del(.active[$name])' "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
-    NEW_CURRENT=$(jq -r --arg name "$CHALLENGE_NAME" \
-      'if .current == $name then (.active | keys[0] // empty) else .current end' "$STATE_FILE")
+    jq --arg name "$CHALLENGE_NAME" '.sessions |= with_entries(select(.value.challenge != $name))' "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
+    NEW_CURRENT=$(jq -r \
+      'if .sessions[.current] | not then (.sessions | keys[0] // empty) else .current end' "$STATE_FILE")
     if [ -z "$NEW_CURRENT" ] || [ "$NEW_CURRENT" = "null" ]; then
       rm -f "$STATE_FILE"
     else

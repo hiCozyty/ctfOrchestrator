@@ -47,12 +47,11 @@ if [ -f "$PENDING_FILE" ] && [ "$YES_FLAG" = "true" ]; then
 
   OK=$(echo "$RESPONSE" | jq -r '.ok // false')
   if [ "$OK" = "true" ]; then
-    # Remove from active state
+    # Remove all sessions for this challenge from state
     if [ -f "$STATE_FILE" ]; then
-      jq --arg name "$PENDING_NAME" 'del(.active[$name])' "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
-      # Update current if needed
-      NEW_CURRENT=$(jq -r --arg name "$PENDING_NAME" \
-        'if .current == $name then (.active | keys[0] // empty) else .current end' "$STATE_FILE")
+      jq --arg name "$PENDING_NAME" '.sessions |= with_entries(select(.value.challenge != $name))' "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
+      NEW_CURRENT=$(jq -r \
+        'if .sessions[.current] | not then (.sessions | keys[0] // empty) else .current end' "$STATE_FILE")
       if [ -z "$NEW_CURRENT" ] || [ "$NEW_CURRENT" = "null" ]; then
         rm -f "$STATE_FILE"
       else
@@ -85,8 +84,11 @@ fi
 if [ -n "$EXPLICIT_NAME" ] && [ "$EXPLICIT_NAME" != "null" ]; then
   CHALLENGE_NAME="$EXPLICIT_NAME"
   CHANNEL_ID=""
+  SESSION_ID=""
   if [ -f "$STATE_FILE" ]; then
-    CHANNEL_ID=$(jq -r --arg name "$CHALLENGE_NAME" '.active[$name].channelId // empty' "$STATE_FILE")
+    SESSION_ID=$(jq -r --arg name "$CHALLENGE_NAME" \
+      '.sessions | to_entries[] | select(.value.challenge == $name) | .key' "$STATE_FILE" | head -1)
+    CHANNEL_ID=$(jq -r --arg sid "$SESSION_ID" '.sessions[$sid].channelId // empty' "$STATE_FILE")
   fi
 else
   if [ ! -f "$STATE_FILE" ]; then
@@ -94,23 +96,25 @@ else
     exit 1
   fi
 
-  ACTIVE_COUNT=$(jq '.active | length' "$STATE_FILE")
-  if [ "$ACTIVE_COUNT" -eq 0 ]; then
+  SESSION_COUNT=$(jq '.sessions | length' "$STATE_FILE")
+  if [ "$SESSION_COUNT" -eq 0 ]; then
     echo "No active challenge. Run /start first."
     exit 1
-  elif [ "$ACTIVE_COUNT" -eq 1 ]; then
-    CHALLENGE_NAME=$(jq -r '.active | keys[0]' "$STATE_FILE")
-    CHANNEL_ID=$(jq -r --arg name "$CHALLENGE_NAME" '.active[$name].channelId' "$STATE_FILE")
+  elif [ "$SESSION_COUNT" -eq 1 ]; then
+    SESSION_ID=$(jq -r '.sessions | keys[0]' "$STATE_FILE")
+    CHALLENGE_NAME=$(jq -r --arg sid "$SESSION_ID" '.sessions[$sid].challenge' "$STATE_FILE")
+    CHANNEL_ID=$(jq -r --arg sid "$SESSION_ID" '.sessions[$sid].channelId' "$STATE_FILE")
   else
     CURRENT=$(jq -r '.current // empty' "$STATE_FILE")
     if [ -z "$CURRENT" ] || [ "$CURRENT" = "null" ]; then
-      echo "Multiple active challenges. Specify which one:"
-      jq -r '.active | keys[]' "$STATE_FILE" | while read -r name; do echo "  - $name"; done
+      echo "Multiple active sessions. Specify which challenge:"
+       jq -r '[.sessions[].challenge] | unique[] | "  \(.)"' "$STATE_FILE"
       echo "Usage: /finish <challenge-name>"
       exit 1
     fi
-    CHALLENGE_NAME="$CURRENT"
-    CHANNEL_ID=$(jq -r --arg name "$CHALLENGE_NAME" '.active[$name].channelId' "$STATE_FILE")
+    SESSION_ID="$CURRENT"
+    CHALLENGE_NAME=$(jq -r --arg sid "$SESSION_ID" '.sessions[$sid].challenge' "$STATE_FILE")
+    CHANNEL_ID=$(jq -r --arg sid "$SESSION_ID" '.sessions[$sid].channelId' "$STATE_FILE")
   fi
 fi
 
