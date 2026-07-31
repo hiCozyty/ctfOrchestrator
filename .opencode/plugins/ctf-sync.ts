@@ -51,11 +51,7 @@ async function syncMessage(workerUrl: string, threadId: string, user: string, co
 	} catch {}
 }
 
-function parseSessionDataToken(part: Record<string, unknown>): string | null {
-	const text = typeof part.text === "string" ? part.text
-		: typeof part.content === "string" ? part.content
-		: null;
-	if (!text) return null;
+function extractToken(text: string): string | null {
 	const match = text.match(/CTF_SESSION_DATA:\s*(\{[^}]+\})/);
 	if (!match) return null;
 	try {
@@ -64,6 +60,40 @@ function parseSessionDataToken(part: Record<string, unknown>): string | null {
 	} catch {
 		return null;
 	}
+}
+
+function parseSessionDataToken(part: Record<string, unknown>): string | null {
+	if (typeof part.text === "string") {
+		const token = extractToken(part.text);
+		if (token) return token;
+	}
+	if (typeof part.content === "string") {
+		const token = extractToken(part.content);
+		if (token) return token;
+	}
+	const state = part.state as Record<string, unknown> | undefined;
+	if (state) {
+		if (typeof state.output === "string") {
+			const token = extractToken(state.output);
+			if (token) return token;
+		}
+		if (typeof state.metadata === "object" && state.metadata) {
+			const meta = state.metadata as Record<string, unknown>;
+			if (typeof meta.output === "string") {
+				const token = extractToken(meta.output);
+				if (token) return token;
+			}
+		}
+		if (Array.isArray(state.content)) {
+			for (const item of state.content as Array<{ type?: string; text?: string }>) {
+				if (item.text) {
+					const token = extractToken(item.text);
+					if (token) return token;
+				}
+			}
+		}
+	}
+	return null;
 }
 
 export const CTFSyncPlugin: Plugin = async ({ client, directory }) => {
@@ -93,36 +123,36 @@ export const CTFSyncPlugin: Plugin = async ({ client, directory }) => {
 				}
 			}
 
-			if (!threadId) {
-				try {
-					const result = (await client.session.messages({
-						path: { id: sessionID },
-					})) as {
-						data?: Array<{
-							info?: { role?: string };
-							parts?: Array<{ type?: string; text?: string }>;
-						}>;
-					};
+			let messages: Array<{ info?: { role?: string }; parts?: Array<Record<string, unknown>> }> | undefined;
 
-					const messages = result?.data;
-					if (messages && Array.isArray(messages)) {
-						for (let i = messages.length - 1; i >= 0; i--) {
-							const msg = messages[i];
-							const parts = msg.parts || [];
-							for (const part of parts) {
-								const tokenThreadId = parseSessionDataToken(part as Record<string, unknown>);
-								if (tokenThreadId) {
-									sessionMap[sessionID] = tokenThreadId;
-									await writeSessionMap(projectDir, sessionMap);
-									threadId = tokenThreadId;
-									break;
-								}
+			try {
+				const result = (await client.session.messages({
+					path: { id: sessionID },
+				})) as {
+					data?: Array<{
+						info?: { role?: string };
+						parts?: Array<Record<string, unknown>>;
+					}>;
+				};
+
+				messages = result?.data;
+				if (messages && Array.isArray(messages) && !threadId) {
+					for (let i = messages.length - 1; i >= 0; i--) {
+						const msg = messages[i];
+						const parts = msg.parts || [];
+						for (const part of parts) {
+							const tokenThreadId = parseSessionDataToken(part);
+							if (tokenThreadId) {
+								sessionMap[sessionID] = tokenThreadId;
+								await writeSessionMap(projectDir, sessionMap);
+								threadId = tokenThreadId;
+								break;
 							}
-							if (threadId) break;
 						}
+						if (threadId) break;
 					}
-				} catch {}
-			}
+				}
+			} catch {}
 
 			if (!threadId) {
 				const state = await readStateFile(projectDir);
@@ -139,32 +169,20 @@ export const CTFSyncPlugin: Plugin = async ({ client, directory }) => {
 
 			if (!threadId) return;
 
-			try {
-				const result = (await client.session.messages({
-					path: { id: sessionID },
-				})) as {
-					data?: Array<{
-						info?: { role?: string };
-						parts?: Array<{ type?: string; text?: string }>;
-					}>;
-				};
+			if (!messages || !Array.isArray(messages)) return;
 
-				const messages = result?.data;
-				if (!messages || !Array.isArray(messages)) return;
+			const lastMsg = messages[messages.length - 1];
+			if (!lastMsg || lastMsg.info?.role !== "assistant") return;
 
-				const lastMsg = messages[messages.length - 1];
-				if (!lastMsg || lastMsg.info?.role !== "assistant") return;
+			const parts = lastMsg.parts || [];
+			const textParts = parts
+				.filter((p) => p.type === "text" && p.text)
+				.map((p) => p.text as string)
+				.join("\n");
 
-				const parts = lastMsg.parts || [];
-				const textParts = parts
-					.filter((p) => p.type === "text" && p.text)
-					.map((p) => p.text!)
-					.join("\n");
+			if (!textParts) return;
 
-				if (!textParts) return;
-
-				await syncMessage(workerUrl, threadId, ctfUser, textParts);
-			} catch {}
+			await syncMessage(workerUrl, threadId, ctfUser, textParts);
 		},
 	};
 };
