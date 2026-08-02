@@ -16,7 +16,12 @@ RESPONSE=$(curl -sS -X POST "$WORKER_URL/init" \
 
 OK=$(echo "$RESPONSE" | jq -r '.ok // false')
 if [ "$OK" = "true" ]; then
-  echo "Initialized as $CTF_USER. You're on the team board."
+  NORMALIZED=$(echo "$RESPONSE" | jq -r '.data.displayName // ""')
+  echo "Initialized as $NORMALIZED. You're on the team board."
+  if [ "$NORMALIZED" != "$CTF_USER" ]; then
+    echo "Note: your name was normalized from \"$CTF_USER\" to \"$NORMALIZED\"."
+    echo "Update CTF_USER in .env to \"$NORMALIZED\" for consistency."
+  fi
 else
   ERROR=$(echo "$RESPONSE" | jq -r '.error // "Unknown error"')
   echo "Init failed: $ERROR"

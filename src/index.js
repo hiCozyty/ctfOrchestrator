@@ -22,6 +22,10 @@ function err(message, status = 400) {
 	return json({ ok: false, error: message }, status);
 }
 
+function normalizeName(s) {
+	return s.normalize("NFKC").trim();
+}
+
 function defaultState() {
 	return {
 		initialized: false,
@@ -139,16 +143,17 @@ export class MyDurableObject extends DurableObject {
 
 	async findUserByName(name) {
 		try {
+			const normalized = normalizeName(name);
 			const results = await this.discordFetch(
-				`/guilds/${GUILD_ID}/members/search?query=${encodeURIComponent(name)}&limit=5`,
+				`/guilds/${GUILD_ID}/members/search?query=${encodeURIComponent(normalized)}&limit=5`,
 				{ method: "GET" },
 			);
 			if (!Array.isArray(results)) return null;
 			for (const member of results) {
-				const nick = member.nick;
-				const username = member.user?.username;
-				const globalName = member.user?.global_name;
-				if (nick === name || username === name || globalName === name) {
+				const nick = member.nick ? normalizeName(member.nick) : "";
+				const username = member.user?.username ? normalizeName(member.user.username) : "";
+				const globalName = member.user?.global_name ? normalizeName(member.user.global_name) : "";
+				if (nick === normalized || username === normalized || globalName === normalized) {
 					return member.user?.id || null;
 				}
 			}
@@ -430,18 +435,20 @@ export class MyDurableObject extends DurableObject {
 			throw new Error("Admin has not initialized challenges yet. Wait for /adminInit.");
 		}
 
-		if (state.players[displayName]) {
-			return { displayName, wasNew: false, message: "Already registered. No need to run /init again." };
+		const normalizedName = normalizeName(displayName);
+
+		if (state.players[normalizedName]) {
+			return { displayName: normalizedName, wasNew: false, message: "Already registered. No need to run /init again." };
 		}
 
 		const wasNew = true;
-		state.players[displayName] = true;
+		state.players[normalizedName] = true;
 		if (userId) {
-			state.playerIds[displayName] = userId;
-		} else if (!state.playerIds || !state.playerIds[displayName]) {
-			const foundId = await this.findUserByName(displayName);
+			state.playerIds[normalizedName] = userId;
+		} else if (!state.playerIds || !state.playerIds[normalizedName]) {
+			const foundId = await this.findUserByName(normalizedName);
 			if (foundId) {
-				state.playerIds[displayName] = foundId;
+				state.playerIds[normalizedName] = foundId;
 			}
 		}
 
@@ -449,7 +456,7 @@ export class MyDurableObject extends DurableObject {
 
 		await this.putState(state);
 
-		return { displayName, wasNew };
+		return { displayName: normalizedName, wasNew };
 	}
 
 	async startChallenge(user, challengeName, sessionId) {
@@ -805,6 +812,9 @@ export default {
 			if (request.method === "POST") {
 				try {
 					body = await request.json();
+					if (typeof body.user === "string") {
+						body.user = normalizeName(body.user);
+					}
 				} catch (_) {
 					return err("Invalid JSON body", 400);
 				}
