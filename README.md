@@ -6,7 +6,7 @@ Cloudflare Worker + Durable Object that coordinates a CTF team through Discord. 
 
 ```
 Agent harness    →   Worker (fetch handler)   →   Durable Object (SQLite)
-(opencode)            routes 12 endpoints         state + Discord API calls
+(opencode)            routes 14 endpoints         state + Discord API calls
 ```
 
 - **One Worker** holds the bot token and routes all HTTP requests to a single Durable Object instance (`idFromName("main")`).
@@ -63,6 +63,7 @@ The Worker expects these categories/channels to already exist:
 | `ctf-challenges` | Active challenge channels |
 | `help-me` | Challenges requesting help |
 | `finished-challenges` | Solved challenges |
+| `offline-challenges` | Archived for offline solving |
 | `#progress` | Pinned players & challenges lists |
 
 ## Testing the full flow
@@ -103,6 +104,16 @@ curl -s -X POST http://localhost:8787/helpme \
 curl -s -X POST http://localhost:8787/undoFinish \
   -H 'Content-Type: application/json' \
   -d '{"user":"Alice","challengeName":"web-flag"}'
+
+# Archive a challenge for offline solving (moves to offline-challenges category)
+curl -s -X POST http://localhost:8787/archive \
+  -H 'Content-Type: application/json' \
+  -d '{"user":"Alice","challenge":"web-flag"}'
+
+# Undo archive — return challenge to active pool
+curl -s -X POST http://localhost:8787/undoArchive \
+  -H 'Content-Type: application/json' \
+  -d '{"user":"Alice","challengeName":"web-flag"}'
 ```
 
 ## Agent integration
@@ -121,6 +132,8 @@ All harnesses use the same shell scripts in `scripts/`:
 | `hook-helpme.sh` | Two-step confirm then calls `/helpme` |
 | `hook-undoFinish.sh` | Calls `/undoFinish`, restores `.ctf-state.json` |
 | `hook-undoStart.sh` | Calls `/undoStart`, cleans `.ctf-state.json` |
+| `hook-archive.sh` | Calls `/archive`, no local state tracking |
+| `hook-undoArchive.sh` | Calls `/undoArchive` |
 | `hook-sync.sh` | Extracts last assistant message from JSONL, calls `/syncMessage` |
 
 Scripts accept CLI args (for direct invocation) and fall back to stdin JSON (for when triggered by hooks). See each script's header for usage.
@@ -140,9 +153,11 @@ Scripts accept CLI args (for direct invocation) and fall back to stdin JSON (for
 | `/helpme` | Request help (two-step via the plugin tool) |
 | `/undoFinish web-flag` | Undo a finished challenge |
 | `/undoStart web-flag` | Undo a challenge start |
+| `/archive web-flag` | Archive challenge for offline solving |
+| `/undoArchive web-flag` | Restore archived challenge to active pool |
 | `/adminReset` | Reset all CTF state (admin only) |
 
-**Custom tools** (called automatically by the LLM): `hook-admin-init.sh`, `hook-admin-reset.sh`, `hook-init.sh`, `hook-start.sh`, `hook-finish.sh`, `hook-helpme.sh`, `hook-undoFinish.sh`, `hook-undoStart.sh`, `hook-sync.sh`.
+**Custom tools** (called automatically by the LLM): `hook-admin-init.sh`, `hook-admin-reset.sh`, `hook-init.sh`, `hook-start.sh`, `hook-finish.sh`, `hook-helpme.sh`, `hook-undoFinish.sh`, `hook-undoStart.sh`, `hook-archive.sh`, `hook-undoArchive.sh`, `hook-sync.sh`.
 
 **Auto-sync**: The `session.idle` handler syncs the last assistant message to the Discord thread.
 
@@ -159,6 +174,8 @@ Scripts accept CLI args (for direct invocation) and fall back to stdin JSON (for
 | `POST` | `/helpme` | `user`, `channelId` | Request help on a challenge |
 | `POST` | `/undoFinish` | `user`, `challengeName` | Un-finish a challenge |
 | `POST` | `/undoStart` | `user`, `challengeName` | Undo a challenge start |
+| `POST` | `/archive` | `user`, `challenge` | Archive challenge for offline solving |
+| `POST` | `/undoArchive` | `user`, `challengeName` | Restore archived challenge to active pool |
 | `POST` | `/syncMessage` | `user`, `channelId`, `content`, `thinking?` | Post a message to a thread |
 | `GET` | `/challenges` | — | List all challenge names |
 | `POST` | `/lookup` | `channelId` or `challengeName` | Look up channel/challenge info |
@@ -201,14 +218,22 @@ All Discord API calls go through a centralized queue (`discordFetch`) that respe
   playerIds: { "Alice": "discord_user_id" }, // for @mentions
   players: { "Alice": true, "Bob": true },
   challenges: {
-    "web-flag": {
-      channelId: "...",
-      solverName: "Alice",
-      solved: true,
-      previousCategory: "ctf-challenges",
-      currentCategory: "finished-challenges",
-      activeUsers: {}
-    }
+     "web-flag": {
+       channelId: "...",
+       solverName: "Alice",
+       solved: true,
+       previousCategory: "ctf-challenges",
+       currentCategory: "finished-challenges",
+       activeUsers: {}
+     },
+     "pwn-stack": {
+       channelId: "...",
+       solverName: null,
+       solved: false,
+       previousCategory: null,
+       currentCategory: "offline-challenges",
+       activeUsers: {}
+     }
   },
   activeSessions: { "session-1": "web-flag" }
 }

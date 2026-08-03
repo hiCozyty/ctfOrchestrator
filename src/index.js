@@ -6,6 +6,7 @@ const GUILD_ID = "1530685499646279931";
 const CTF_CHALLENGES_CATEGORY = "1530688113708634287";
 const HELP_ME_CATEGORY = "1530744344221585508";
 const FINISHED_CHALLENGES_CATEGORY = "1530748539301400586";
+const OFFLINE_CHALLENGES_CATEGORY = "1533649005928517792";
 const PROGRESS_CHANNEL = "1530742679326035978";
 
 function json(data, status = 200) {
@@ -209,6 +210,9 @@ export class MyDurableObject extends DurableObject {
 		const entries = Object.entries(state.challenges);
 		if (entries.length === 0) return ["**Challenges**\n*No challenges yet*"];
 		const lines = entries.map(([name, ch]) => {
+			if (ch.currentCategory === "offline-challenges") {
+				return `${name}: ***(archived for offline solving. prioritize other challenges)***`;
+			}
 			if (ch.solved) {
 				const solver = mentions[ch.solverName] || `@${ch.solverName || "unknown"}`;
 				return `~~${name}~~ *(solved by ${solver})*`;
@@ -398,7 +402,7 @@ export class MyDurableObject extends DurableObject {
 		}
 
 		// Delete all channels in CTF categories
-		const categories = [CTF_CHALLENGES_CATEGORY, HELP_ME_CATEGORY, FINISHED_CHALLENGES_CATEGORY];
+		const categories = [CTF_CHALLENGES_CATEGORY, HELP_ME_CATEGORY, FINISHED_CHALLENGES_CATEGORY, OFFLINE_CHALLENGES_CATEGORY];
 		try {
 			const channels = await this.discordFetch(
 				`/guilds/${GUILD_ID}/channels`,
@@ -475,6 +479,9 @@ export class MyDurableObject extends DurableObject {
 		}
 		if (challenge.solved) {
 			throw new Error(`Challenge "${challengeName}" is already solved.`);
+		}
+		if (challenge.currentCategory === "offline-challenges") {
+			throw new Error(`Challenge "${challengeName}" is archived. Run /undoArchive first.`);
 		}
 
 		if (state.activeSessions[sessionId]) {
@@ -557,6 +564,9 @@ export class MyDurableObject extends DurableObject {
 		if (challenge.solved) {
 			throw new Error(`Challenge "${name}" is already marked as solved.`);
 		}
+		if (challenge.currentCategory === "offline-challenges") {
+			throw new Error(`Challenge "${name}" is archived. Run /undoArchive first.`);
+		}
 
 		if (!challenge.activeUsers[user]) {
 			throw new Error(`You haven't started working on "${name}". Run /start first.`);
@@ -616,6 +626,9 @@ export class MyDurableObject extends DurableObject {
 		const { name, challenge } = found;
 		if (challenge.solved) {
 			throw new Error(`Challenge "${name}" is already solved. Cannot request help.`);
+		}
+		if (challenge.currentCategory === "offline-challenges") {
+			throw new Error(`Challenge "${name}" is archived. Run /undoArchive first.`);
 		}
 		if (!challenge.activeUsers[user]) {
 			throw new Error(`You haven't started working on "${name}". Run /start first.`);
@@ -725,6 +738,109 @@ export class MyDurableObject extends DurableObject {
 
 		await this.putState(state);
 		return { challengeName, user };
+	}
+
+	async archiveChallenge(user, challengeName) {
+		const state = await this.getState();
+
+		if (!state.initialized) {
+			throw new Error("Admin has not initialized challenges yet. Wait for /adminInit.");
+		}
+		if (!state.players[user]) {
+			throw new Error("You haven't run /init yet. Run /init first.");
+		}
+
+		const challenge = state.challenges[challengeName];
+		if (!challenge) {
+			throw new Error(`Challenge "${challengeName}" not found.`);
+		}
+		if (challenge.solved) {
+			throw new Error(`Challenge "${challengeName}" is already solved.`);
+		}
+		if (Object.keys(challenge.activeUsers).length > 0) {
+			throw new Error(`Challenge "${challengeName}" has active users. Cannot archive.`);
+		}
+		if (challenge.currentCategory === "offline-challenges") {
+			return { channelId: challenge.channelId, challengeName, message: "Already archived." };
+		}
+
+		let channelId = challenge.channelId;
+		if (!channelId) {
+			const channel = await this.discordFetch(
+				`/guilds/${GUILD_ID}/channels`,
+				{
+					method: "POST",
+					body: JSON.stringify({
+						name: challengeName,
+						type: 0,
+						parent_id: OFFLINE_CHALLENGES_CATEGORY,
+					}),
+				},
+			);
+			channelId = channel.id;
+			challenge.channelId = channelId;
+		} else {
+			await this.discordFetch(
+				`/channels/${channelId}`,
+				{
+					method: "PATCH",
+					body: JSON.stringify({ parent_id: OFFLINE_CHALLENGES_CATEGORY }),
+				},
+			);
+		}
+
+		challenge.previousCategory = challenge.currentCategory;
+		challenge.currentCategory = "offline-challenges";
+
+		await this.discordFetch(
+			`/channels/${channelId}/messages`,
+			{
+				method: "POST",
+				body: JSON.stringify({
+					content: "***This challenge is archived for offline solving. Prioritize other challenges.***",
+				}),
+			},
+		);
+
+		await this.sendChallengeBoard(state);
+		await this.putState(state);
+
+		return { channelId, challengeName };
+	}
+
+	async undoArchiveChallenge(user, challengeName) {
+		const state = await this.getState();
+
+		if (!state.initialized) {
+			throw new Error("Admin has not initialized challenges yet. Wait for /adminInit.");
+		}
+		if (!state.players[user]) {
+			throw new Error("You haven't run /init yet. Run /init first.");
+		}
+
+		const challenge = state.challenges[challengeName];
+		if (!challenge) {
+			throw new Error(`Challenge "${challengeName}" not found.`);
+		}
+		if (challenge.currentCategory !== "offline-challenges") {
+			throw new Error(`Challenge "${challengeName}" is not archived.`);
+		}
+
+		await this.discordFetch(
+			`/channels/${challenge.channelId}`,
+			{
+				method: "PATCH",
+				body: JSON.stringify({ parent_id: CTF_CHALLENGES_CATEGORY }),
+			},
+		);
+
+		challenge.currentCategory = challenge.previousCategory || null;
+		challenge.previousCategory = null;
+
+		await this.sendChallengeBoard(state);
+		await this.putState(state);
+
+		return { channelId: challenge.channelId, challengeName };
 	}
 
 	async syncMessage(channelId, user, content, thinking) {
@@ -851,10 +967,18 @@ export default {
 					result = await stub.undoFinishChallenge(body.user, body.challengeName);
 					break;
 				}
-				case "/undoStart": {
-					result = await stub.undoStartChallenge(body.user, body.challengeName);
-					break;
-				}
+			case "/undoStart": {
+				result = await stub.undoStartChallenge(body.user, body.challengeName);
+				break;
+			}
+			case "/archive": {
+				result = await stub.archiveChallenge(body.user, body.challenge);
+				break;
+			}
+			case "/undoArchive": {
+				result = await stub.undoArchiveChallenge(body.user, body.challengeName);
+				break;
+			}
 			case "/syncMessage": {
 				result = await stub.syncMessage(body.channelId, body.user, body.content, body.thinking);
 				break;

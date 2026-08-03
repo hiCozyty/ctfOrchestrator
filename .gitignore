@@ -165,4 +165,4 @@ dist
 .env
 !.env.example
 .wrangler/
-.ctf-session-map
+.ctf-*

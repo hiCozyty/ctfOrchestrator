@@ -10,6 +10,8 @@ This is a CTF event coordination bot. The `hook-*.sh` scripts in `scripts/` talk
 - `hook-helpme.sh` — request help on a challenge (two-step confirmation)
 - `hook-undoStart.sh` — undo a challenge start
 - `hook-undoFinish.sh` — undo a challenge finish
+- `hook-archive.sh` — archive a challenge for offline solving (no thread, no user assignment)
+- `hook-undoArchive.sh` — restore an archived challenge to the active pool
 - `hook-sync.sh [--thread-id <id>]` — sync transcript with the Worker. Pass --thread-id to target a specific thread (recommended when multiple sessions are active).
 
 ## CTF-MCP Tools
