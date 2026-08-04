@@ -25,6 +25,12 @@ STATE_FILE="$PROJECT_DIR/.ctf-state.json"
 
 INPUT="$(cat 2>/dev/null || echo '{}')"
 TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // .properties.transcript_path // empty')
+if [ -z "$TRANSCRIPT_PATH" ] || [ "$TRANSCRIPT_PATH" = "null" ]; then
+  SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
+  if [ -n "$SESSION_ID" ] && [ "$SESSION_ID" != "null" ]; then
+    TRANSCRIPT_PATH=$(find ~/.claude/projects -name "${SESSION_ID}.jsonl" 2>/dev/null | head -1)
+  fi
+fi
 [ -z "$TRANSCRIPT_PATH" ] || [ "$TRANSCRIPT_PATH" = "null" ] && exit 0
 [ ! -f "$TRANSCRIPT_PATH" ] && exit 0
 

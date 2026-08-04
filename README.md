@@ -5,8 +5,8 @@ Cloudflare Worker + Durable Object that coordinates a CTF team through Discord. 
 ## How it works
 
 ```
-Agent harness    →   Worker (fetch handler)   →   Durable Object (SQLite)
-(opencode)            routes 14 endpoints         state + Discord API calls
+Agent harness             →   Worker (fetch handler)   →   Durable Object (SQLite)
+(opencode / Claude Code)       routes 14 endpoints         state + Discord API calls
 ```
 
 - **One Worker** holds the bot token and routes all HTTP requests to a single Durable Object instance (`idFromName("main")`).
@@ -134,7 +134,7 @@ All harnesses use the same shell scripts in `scripts/`:
 | `hook-undoStart.sh` | Calls `/undoStart`, cleans `.ctf-state.json` |
 | `hook-archive.sh` | Calls `/archive`, no local state tracking |
 | `hook-undoArchive.sh` | Calls `/undoArchive` |
-| `hook-sync.sh` | Extracts last assistant message from JSONL, calls `/syncMessage` |
+| `hook-sync.sh` | Extracts last assistant message from JSONL (opencode transcript or Claude Code session), calls `/syncMessage` |
 
 Scripts accept CLI args (for direct invocation) and fall back to stdin JSON (for when triggered by hooks). See each script's header for usage.
 
@@ -160,6 +160,27 @@ Scripts accept CLI args (for direct invocation) and fall back to stdin JSON (for
 **Custom tools** (called automatically by the LLM): `hook-admin-init.sh`, `hook-admin-reset.sh`, `hook-init.sh`, `hook-start.sh`, `hook-finish.sh`, `hook-helpme.sh`, `hook-undoFinish.sh`, `hook-undoStart.sh`, `hook-archive.sh`, `hook-undoArchive.sh`, `hook-sync.sh`.
 
 **Auto-sync**: The `session.idle` handler syncs the last assistant message to the Discord thread.
+
+### Claude Code
+
+**File**: `.claude/settings.json` (Stop hook) + `.claude/commands/*.md` (symlinks → `.opencode/commands/`)
+
+No plugin needed. Claude Code's native `Stop` hook fires after every assistant response and runs `scripts/hook-sync.sh`, which detects the `session_id` from the hook's stdin and locates the Claude Code session JSONL at `~/.claude/projects/<hash>/<session_id>.jsonl`.
+
+**Slash commands**: Same as opencode — type these in the Claude Code TUI:
+
+| Command | Example |
+|---------|---------|
+| `/adminInit web-flag crypto-rsa` | Initialize with challenge list |
+| `/init` | Register as a player (uses `CTF_USER` from `.env`) |
+| `/start web-flag` | Start working on a challenge |
+| `/finish` | Finish (two-step) |
+| `/helpme` | Request help (two-step) |
+| `/undoFinish web-flag` | Undo a finished challenge |
+| `/undoStart web-flag` | Undo a challenge start |
+| `/archive web-flag` | Archive challenge for offline solving |
+| `/undoArchive web-flag` | Restore archived challenge to active pool |
+| `/adminReset` | Reset all CTF state (admin only) |
 
 ## API reference
 

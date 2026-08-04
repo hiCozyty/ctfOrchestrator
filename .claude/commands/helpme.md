@@ -1,0 +1,1 @@
+../../.opencode/commands/helpme.md
