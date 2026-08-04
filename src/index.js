@@ -27,6 +27,10 @@ function normalizeName(s) {
 	return s.normalize("NFKC").trim();
 }
 
+function sanitizeName(s) {
+	return s.replace(/[^a-zA-Z0-9\s\-]/g, "").trim();
+}
+
 function defaultState() {
 	return {
 		initialized: false,
@@ -320,7 +324,8 @@ export class MyDurableObject extends DurableObject {
 
 		const challenges = {};
 		for (const name of challengeList) {
-			challenges[name] = {
+			const sname = sanitizeName(name);
+			challenges[sname] = {
 				channelId: null,
 				solverName: null,
 				solved: false,
@@ -473,15 +478,16 @@ export class MyDurableObject extends DurableObject {
 			throw new Error("You haven't run /init yet. Run /init first.");
 		}
 
-		const challenge = state.challenges[challengeName];
+		const sname = sanitizeName(challengeName);
+		const challenge = state.challenges[sname];
 		if (!challenge) {
-			throw new Error(`Challenge "${challengeName}" not found.`);
+			throw new Error(`Challenge "${sname}" not found.`);
 		}
 		if (challenge.solved) {
-			throw new Error(`Challenge "${challengeName}" is already solved.`);
+			throw new Error(`Challenge "${sname}" is already solved.`);
 		}
 		if (challenge.currentCategory === "offline-challenges") {
-			throw new Error(`Challenge "${challengeName}" is archived. Run /undoArchive first.`);
+			throw new Error(`Challenge "${sname}" is archived. Run /undoArchive first.`);
 		}
 
 		if (state.activeSessions[sessionId]) {
@@ -494,49 +500,49 @@ export class MyDurableObject extends DurableObject {
 				`/guilds/${GUILD_ID}/channels`,
 				{
 					method: "POST",
-					body: JSON.stringify({
-						name: challengeName,
-						type: 0,
-						parent_id: CTF_CHALLENGES_CATEGORY,
-					}),
-				},
-			);
-			channelId = channel.id;
-			challenge.channelId = channelId;
-			challenge.currentCategory = "ctf-challenges";
-			await this.putState(state);
-		}
-
-		const starterMsg = await this.discordFetch(
-			`/channels/${channelId}/messages`,
-			{
-				method: "POST",
 				body: JSON.stringify({
-					content: `**${user}** started working on this challenge.`,
+					name: sname,
+					type: 0,
+					parent_id: CTF_CHALLENGES_CATEGORY,
 				}),
 			},
 		);
-
-		const thread = await this.discordFetch(
-			`/channels/${channelId}/messages/${starterMsg.id}/threads`,
-			{
-				method: "POST",
-				body: JSON.stringify({
-					name: user,
-					auto_archive_duration: 10080,
-				}),
-			},
-		);
-
-		challenge.activeUsers[user] = true;
-		state.activeSessions[sessionId] = { challengeName, threadId: thread.id };
-
-		await this.sendPlayerBoard(state);
-		await this.sendChallengeBoard(state);
-
+		channelId = channel.id;
+		challenge.channelId = channelId;
+		challenge.currentCategory = "ctf-challenges";
 		await this.putState(state);
+	}
 
-		return { channelId, threadId: thread.id, challengeName };
+	const starterMsg = await this.discordFetch(
+		`/channels/${channelId}/messages`,
+		{
+			method: "POST",
+			body: JSON.stringify({
+				content: `**${user}** started working on this challenge.`,
+			}),
+		},
+	);
+
+	const thread = await this.discordFetch(
+		`/channels/${channelId}/messages/${starterMsg.id}/threads`,
+		{
+			method: "POST",
+			body: JSON.stringify({
+				name: user,
+				auto_archive_duration: 10080,
+			}),
+		},
+	);
+
+	challenge.activeUsers[user] = true;
+	state.activeSessions[sessionId] = { challengeName: sname, threadId: thread.id };
+
+	await this.sendPlayerBoard(state);
+	await this.sendChallengeBoard(state);
+
+	await this.putState(state);
+
+	return { channelId, threadId: thread.id, challengeName: sname };
 	}
 
 	async finishChallenge(user, channelId) {
@@ -662,18 +668,19 @@ export class MyDurableObject extends DurableObject {
 			throw new Error("You haven't run /init yet. Run /init first.");
 		}
 
-		const challenge = state.challenges[challengeName];
+		const sname = sanitizeName(challengeName);
+		const challenge = state.challenges[sname];
 		if (!challenge) {
-			throw new Error(`Challenge "${challengeName}" not found.`);
+			throw new Error(`Challenge "${sname}" not found.`);
 		}
 		if (!challenge.solved) {
-			throw new Error(`Challenge "${challengeName}" is not solved. Nothing to undo.`);
+			throw new Error(`Challenge "${sname}" is not solved. Nothing to undo.`);
 		}
 		if (challenge.solverName !== user) {
 			throw new Error(`Only ${challenge.solverName} (the solver) can undo this finish.`);
 		}
 		if (!challenge.previousCategory) {
-			throw new Error(`Cannot undo: previous category not recorded for "${challengeName}".`);
+			throw new Error(`Cannot undo: previous category not recorded for "${sname}".`);
 		}
 
 		const targetCategory =
@@ -702,7 +709,7 @@ export class MyDurableObject extends DurableObject {
 		await this.sendPlayerBoard(state);
 
 		await this.putState(state);
-		return { challengeName, channelId: challenge.channelId, restoredTo: challenge.currentCategory };
+		return { challengeName: sname, channelId: challenge.channelId, restoredTo: challenge.currentCategory };
 	}
 
 	async undoStartChallenge(user, challengeName) {
@@ -715,32 +722,33 @@ export class MyDurableObject extends DurableObject {
 			throw new Error("You haven't run /init yet. Run /init first.");
 		}
 
-		const challenge = state.challenges[challengeName];
+		const sname = sanitizeName(challengeName);
+		const challenge = state.challenges[sname];
 		if (!challenge) {
-			throw new Error(`Challenge "${challengeName}" not found.`);
+			throw new Error(`Challenge "${sname}" not found.`);
 		}
 		if (challenge.solved) {
-			throw new Error(`Challenge "${challengeName}" is already solved. Cannot undo start.`);
+			throw new Error(`Challenge "${sname}" is already solved. Cannot undo start.`);
 		}
 		if (!challenge.activeUsers[user]) {
-			throw new Error(`You haven't started "${challengeName}". Nothing to undo.`);
+			throw new Error(`You haven't started "${sname}". Nothing to undo.`);
 		}
 
 		delete challenge.activeUsers[user];
 
-		for (const [sessionId, entry] of Object.entries(state.activeSessions)) {
-			if (entry.challengeName === challengeName && sessionId.startsWith(user + "-")) {
+	for (const [sessionId, entry] of Object.entries(state.activeSessions)) {
+			if (entry.challengeName === sname && sessionId.startsWith(user + "-")) {
 				delete state.activeSessions[sessionId];
 			}
 		}
 
-		await this.sendPlayerBoard(state);
+	await this.sendPlayerBoard(state);
 
-		await this.putState(state);
-		return { challengeName, user };
-	}
+	await this.putState(state);
+	return { challengeName: sname, user };
+}
 
-	async archiveChallenge(user, challengeName) {
+async archiveChallenge(user, challengeName) {
 		const state = await this.getState();
 
 		if (!state.initialized) {
@@ -750,18 +758,19 @@ export class MyDurableObject extends DurableObject {
 			throw new Error("You haven't run /init yet. Run /init first.");
 		}
 
-		const challenge = state.challenges[challengeName];
+		const sname = sanitizeName(challengeName);
+		const challenge = state.challenges[sname];
 		if (!challenge) {
-			throw new Error(`Challenge "${challengeName}" not found.`);
+			throw new Error(`Challenge "${sname}" not found.`);
 		}
 		if (challenge.solved) {
-			throw new Error(`Challenge "${challengeName}" is already solved.`);
+			throw new Error(`Challenge "${sname}" is already solved.`);
 		}
 		if (Object.keys(challenge.activeUsers).length > 0) {
-			throw new Error(`Challenge "${challengeName}" has active users. Cannot archive.`);
+			throw new Error(`Challenge "${sname}" has active users. Cannot archive.`);
 		}
 		if (challenge.currentCategory === "offline-challenges") {
-			return { channelId: challenge.channelId, challengeName, message: "Already archived." };
+			return { channelId: challenge.channelId, challengeName: sname, message: "Already archived." };
 		}
 
 		let channelId = challenge.channelId;
@@ -770,42 +779,42 @@ export class MyDurableObject extends DurableObject {
 				`/guilds/${GUILD_ID}/channels`,
 				{
 					method: "POST",
-					body: JSON.stringify({
-						name: challengeName,
-						type: 0,
-						parent_id: OFFLINE_CHALLENGES_CATEGORY,
-					}),
-				},
-			);
-			channelId = channel.id;
-			challenge.channelId = channelId;
-		} else {
-			await this.discordFetch(
-				`/channels/${channelId}`,
-				{
-					method: "PATCH",
-					body: JSON.stringify({ parent_id: OFFLINE_CHALLENGES_CATEGORY }),
-				},
-			);
-		}
-
-		challenge.previousCategory = challenge.currentCategory;
-		challenge.currentCategory = "offline-challenges";
-
-		await this.discordFetch(
-			`/channels/${channelId}/messages`,
-			{
-				method: "POST",
 				body: JSON.stringify({
-					content: "***This challenge is archived for offline solving. Prioritize other challenges.***",
+					name: sname,
+					type: 0,
+					parent_id: OFFLINE_CHALLENGES_CATEGORY,
 				}),
 			},
 		);
+		channelId = channel.id;
+		challenge.channelId = channelId;
+	} else {
+		await this.discordFetch(
+			`/channels/${channelId}`,
+			{
+				method: "PATCH",
+				body: JSON.stringify({ parent_id: OFFLINE_CHALLENGES_CATEGORY }),
+			},
+		);
+	}
 
-		await this.sendChallengeBoard(state);
-		await this.putState(state);
+	challenge.previousCategory = challenge.currentCategory;
+	challenge.currentCategory = "offline-challenges";
 
-		return { channelId, challengeName };
+	await this.discordFetch(
+		`/channels/${channelId}/messages`,
+		{
+			method: "POST",
+			body: JSON.stringify({
+				content: "***This challenge is archived for offline solving. Prioritize other challenges.***",
+			}),
+		},
+	);
+
+	await this.sendChallengeBoard(state);
+	await this.putState(state);
+
+	return { channelId, challengeName: sname };
 	}
 
 	async undoArchiveChallenge(user, challengeName) {
@@ -818,12 +827,13 @@ export class MyDurableObject extends DurableObject {
 			throw new Error("You haven't run /init yet. Run /init first.");
 		}
 
-		const challenge = state.challenges[challengeName];
+		const sname = sanitizeName(challengeName);
+		const challenge = state.challenges[sname];
 		if (!challenge) {
-			throw new Error(`Challenge "${challengeName}" not found.`);
+			throw new Error(`Challenge "${sname}" not found.`);
 		}
 		if (challenge.currentCategory !== "offline-challenges") {
-			throw new Error(`Challenge "${challengeName}" is not archived.`);
+			throw new Error(`Challenge "${sname}" is not archived.`);
 		}
 
 		await this.discordFetch(
@@ -840,7 +850,7 @@ export class MyDurableObject extends DurableObject {
 		await this.sendChallengeBoard(state);
 		await this.putState(state);
 
-		return { channelId: challenge.channelId, challengeName };
+		return { channelId: challenge.channelId, challengeName: sname };
 	}
 
 	async syncMessage(channelId, user, content, thinking) {
@@ -886,11 +896,12 @@ export class MyDurableObject extends DurableObject {
 	async lookupChallenge(channelId, challengeName) {
 		const state = await this.getState();
 		if (challengeName) {
-			const ch = state.challenges[challengeName];
+			const sname = sanitizeName(challengeName);
+			const ch = state.challenges[sname];
 			if (ch) {
-				return { challengeName, solved: ch.solved, solverName: ch.solverName, channelId: ch.channelId };
+				return { challengeName: sname, solved: ch.solved, solverName: ch.solverName, channelId: ch.channelId };
 			}
-			throw new Error(`Challenge "${challengeName}" not found.`);
+			throw new Error(`Challenge "${sname}" not found.`);
 		}
 		if (channelId) {
 			for (const [name, ch] of Object.entries(state.challenges)) {
